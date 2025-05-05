@@ -12,7 +12,9 @@ let labels = [];
 let responses = {};
 let trainingMode = {}; // { chatId: { input: '', state: 'awaiting_response' } }
 
-// 🧠 Загрузка знаний
+let botUsername = 'zikrullogpt_bot'; // сюда подгрузим имя бота из Telegram
+
+// 🧠 Загрузка базы знаний
 if (fs.existsSync(KNOWLEDGE_FILE)) {
     try {
         const data = JSON.parse(fs.readFileSync(KNOWLEDGE_FILE, 'utf-8'));
@@ -63,30 +65,45 @@ function findMostSimilarSample(input, samples) {
     return { index: bestMatch, score: bestScore };
 }
 
-// 📩 Обработка сообщений
+// 📩 Обработка входящих сообщений
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
-    const input = msg.text?.trim().toLowerCase();
+    const isGroup = msg.chat.type.includes('group');
+    const input = msg.text?.trim();
 
     if (!input) return;
+
+    // В группах обрабатываем только если бот упомянут
+    if (isGroup) {
+        if (!botUsername) {
+            const me = await bot.getMe();
+            botUsername = me.username;
+        }
+
+        if (!input.toLowerCase().includes(`@${botUsername.toLowerCase()}`)) {
+            return; // бот не был упомянут
+        }
+    }
+
+    const cleanedInput = input.replace(new RegExp(`@${botUsername}`, 'gi'), '').trim().toLowerCase();
 
     // 🎓 Режим обучения
     if (trainingMode[chatId] && trainingMode[chatId].state === 'awaiting_response') {
         const originalInput = trainingMode[chatId].input;
         const newLabel = `custom_${Object.keys(responses).length}`;
-        responses[newLabel] = input;
+        responses[newLabel] = cleanedInput;
         samples.push(originalInput);
         labels.push(newLabel);
         trainingMode[chatId] = null;
 
-        // 💾 Сохраняем знания
+        // 💾 Сохраняем
         fs.writeFileSync(KNOWLEDGE_FILE, JSON.stringify({ samples, labels, responses }, null, 2));
         bot.sendMessage(chatId, '🤖 Зикиҷон: Рахмат брат, ёдамба мондам!');
         return;
     }
 
-    // 🔍 Поиск ответа
-    const match = findMostSimilarSample(input, samples);
+    // 🔍 Поиск
+    const match = findMostSimilarSample(cleanedInput, samples);
 
     if (typeof match === 'number') {
         const label = labels[match];
@@ -100,10 +117,10 @@ bot.on('message', async (msg) => {
         return;
     }
 
-    // 🤷‍♂️ Не понял — просим научить
+    // ❓ Не понял — просим обучить
     bot.sendMessage(chatId, '🤖 Зикиҷон: Ман чизе гум акун из гапатба?\nНавис чавобат.');
     trainingMode[chatId] = {
-        input: input,
+        input: cleanedInput,
         state: 'awaiting_response'
     };
 });
